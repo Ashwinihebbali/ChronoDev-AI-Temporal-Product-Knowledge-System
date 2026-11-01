@@ -7,7 +7,11 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1.svg?logo=postgresql&logoColor=white)](https://www.postgresql.org)
 [![Ollama](https://img.shields.io/badge/Ollama-llama3.2:3b-black.svg?logo=ollama&logoColor=white)](https://ollama.com)
 
-**ChronoDev AI** is a temporal product-record knowledge platform and evidence-grounded AI assistant built for the **Apache Axis2** ecosystem. It traces software evolution across 32,500+ dated milestones, extracts canonical feature identities, cross-links multi-model knowledge graphs, and performs strict evidence-grounded Q&A via local Ollama models.
+## Problem Statement 2
+
+Product teams need a reliable way to understand how a software system evolved, why important decisions were made, and which requirements and features were affected. Git history, issue trackers, configuration records, and documentation are often fragmented, making it difficult to reconstruct past states or assess the impact of current changes.
+
+**ChronoDev AI** addresses this problem as a temporal product knowledge system for the **Apache Axis2** ecosystem. It converts 32,500+ dated milestones into connected, evidence-backed product history and supports historical state reconstruction, impact exploration, and grounded natural-language questions.
 
 ----
 
@@ -23,6 +27,19 @@
 - **Jira Issue & Git Commit Hub**: Search ticket history, review discussion comments, and trace linked commits with author and diff metadata.
 - **Quality Audit & Review Flags**: Automated conflict detection and data integrity auditing across features and timestamps.
 - **Incremental Ingestion**: Add individual records or batch JSON imports with automatic deduplication and Ollama feature extraction.
+
+### Problem Statement Alignment
+
+| Core requirement | ChronoDev AI implementation |
+|---|---|
+| Trace feature evolution over time | Interactive timeline with chronological and Gantt-style views |
+| Preserve and connect product evidence | PostgreSQL source records projected into a Neo4j knowledge graph |
+| Identify canonical features and aliases | Persistent feature registry, feature resolution, and alias tracking |
+| Reconstruct historical project state | Time Machine view queries implemented events as of a selected date |
+| Analyze dependencies and change impact | Interactive knowledge graph with features, relations, issues, commits, and evidence |
+| Support natural-language questions | Evidence-grounded assistant powered by local Ollama |
+| Audit incomplete or conflicting history | Review flags for data conflicts and integrity checks |
+| Support ongoing data growth | Individual and batch ingestion with deduplication and feature extraction |
 
 ---
 

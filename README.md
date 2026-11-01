@@ -7,8 +7,6 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1.svg?logo=postgresql&logoColor=white)](https://www.postgresql.org)
 [![Ollama](https://img.shields.io/badge/Ollama-llama3.2:3b-black.svg?logo=ollama&logoColor=white)](https://ollama.com)
 
-## Problem Statement 2
-
 Product teams need a reliable way to understand how a software system evolved, why important decisions were made, and which requirements and features were affected. Git history, issue trackers, configuration records, and documentation are often fragmented, making it difficult to reconstruct past states or assess the impact of current changes.
 
 **ChronoDev AI** addresses this problem as a temporal product knowledge system for the **Apache Axis2** ecosystem. It converts 32,500+ dated milestones into connected, evidence-backed product history and supports historical state reconstruction, impact exploration, and grounded natural-language questions.

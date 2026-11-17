@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "llama3.2:3b"
     use_ollama: bool = True
+    github_repository: str = ""
+    github_token: str = ""
+    github_webhook_secret: str = ""
+    github_poll_interval_seconds: int = 300
+    github_initial_commit_count: int = 20
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 settings = Settings()

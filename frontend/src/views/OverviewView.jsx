@@ -5,6 +5,8 @@ import Timeline from '../Timeline';
 export function OverviewView({
   status,
   aiStatus,
+  githubStatus,
+  githubCommits = [],
   events = [],
   features = [],
   flags = [],
@@ -281,6 +283,57 @@ export function OverviewView({
           </div>
         </div>
       </div>
+
+      <section className="panel github-commits-panel">
+        <div className="panel-header">
+          <div>
+            <span className="badge badge-accent">
+              <Icon name="issues" size={12} /> GITHUB COMMIT FEED
+            </span>
+            <h2 className="panel-title">Recent Repository Commits</h2>
+          </div>
+          <span className={`badge ${githubStatus?.enabled ? 'badge-success' : 'badge-subtle'}`}>
+            {githubStatus?.enabled
+              ? `${githubStatus.commit_count || 0} commits · ${githubStatus.status}`
+              : 'Not configured'}
+          </span>
+        </div>
+
+        {githubStatus?.last_error && (
+          <p className="github-commits-message" role="status">{githubStatus.last_error}</p>
+        )}
+        {!githubStatus?.enabled && (
+          <p className="github-commits-message">
+            Set GITHUB_REPOSITORY in backend/.env to enable commit ingestion.
+          </p>
+        )}
+        {githubStatus?.enabled && githubCommits.length === 0 && !githubStatus?.last_error && (
+          <p className="github-commits-message">Waiting for the first GitHub commit sync.</p>
+        )}
+        {githubCommits.length > 0 && (
+          <div className="github-commit-list">
+            {githubCommits.map((commit) => (
+              <a
+                className="github-commit-card"
+                href={commit.commit_url}
+                key={commit.commit_hash}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <div className="github-commit-heading">
+                  <strong className="github-commit-message">{commit.message}</strong>
+                  <code>{commit.commit_hash?.slice(0, 7)}</code>
+                </div>
+                <div className="github-commit-meta">
+                  <span>{commit.author}</span>
+                  <span>{commit.date ? new Date(commit.date).toLocaleString() : 'Date unavailable'}</span>
+                  <span>{commit.files_changed?.length || 0} files</span>
+                </div>
+              </a>
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

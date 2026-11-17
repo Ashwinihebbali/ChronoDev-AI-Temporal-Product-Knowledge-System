@@ -1,15 +1,16 @@
 from contextlib import asynccontextmanager
 import asyncio
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 import json
 import re
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import httpx
 from config import settings
 from data_service import ChronoData
 from feature_store import FeatureRegistry
+from github_sync import answer_latest_commit_question, is_latest_commit_question, normalize_repository, poll_github_commits, push_payload_commits, verify_webhook_signature
 
 async def _graph_sync_loop(app: FastAPI, driver):
     from neo4j_sync import sync_postgres_to_neo4j
@@ -25,8 +26,29 @@ async def _graph_sync_loop(app: FastAPI, driver):
             app.state.graph_sync.update({"status":"retrying", "last_error":str(exc)[:500]})
         await asyncio.sleep(max(2, settings.graph_sync_interval_seconds))
 
+async def _github_poll_loop(app: FastAPI):
+    while True:
+        try:
+            result = await asyncio.to_thread(
+                poll_github_commits,
+                settings.github_repository,
+                settings.github_token,
+                app.state.history,
+                settings.github_initial_commit_count,
+            )
+            app.state.github_sync.update({
+                "status":"ok",
+                "last_sync_at":datetime.now(timezone.utc).isoformat(),
+                "last_error":None,
+                **result,
+            })
+        except Exception as exc:
+            app.state.github_sync.update({"status":"error", "last_error":str(exc)[:500]})
+        await asyncio.sleep(settings.github_poll_interval_seconds)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    repository = normalize_repository(settings.github_repository) if settings.github_repository.strip() else ""
     if settings.database_url.strip():
         from postgres_store import PostgresFeatureRegistry
         registry = PostgresFeatureRegistry(settings.database_url)
@@ -41,18 +63,35 @@ async def lifespan(app: FastAPI):
         from history_store import HistoryStore
         app.state.history = HistoryStore(settings.database_url)
         app.state.ingestion_result = await asyncio.to_thread(app.state.history.ingest_dataset, app.state.data)
+    app.state.github_sync = {
+        "enabled":bool(repository and app.state.history),
+        "repository":repository or None,
+        "polling_interval_seconds":settings.github_poll_interval_seconds if repository else None,
+        "status":"disabled" if not repository or not app.state.history else "starting",
+        "last_sync_at":None,
+        "last_error":None if app.state.history else "GitHub commit history requires PostgreSQL.",
+    }
     app.state.graph_sync = {"enabled":bool(settings.database_url and settings.neo4j_uri),
                             "status":"disabled", "last_sync_counts":None, "last_error":None}
     driver = None
     sync_task = None
+    github_task = None
     if settings.database_url and settings.neo4j_uri:
         from neo4j import GraphDatabase
         driver = GraphDatabase.driver(settings.neo4j_uri,
             auth=(settings.neo4j_user, settings.neo4j_password))
         sync_task = asyncio.create_task(_graph_sync_loop(app, driver))
+    if app.state.history and repository and settings.github_poll_interval_seconds > 0:
+        github_task = asyncio.create_task(_github_poll_loop(app))
     try:
         yield
     finally:
+        if github_task:
+            github_task.cancel()
+            try:
+                await github_task
+            except asyncio.CancelledError:
+                pass
         if sync_task:
             sync_task.cancel()
             try:
@@ -111,6 +150,53 @@ def storage_status():
             "neo4j_configured":bool(settings.neo4j_uri),
             "graph_sync":app.state.graph_sync,
             "dataset_ingestion":app.state.ingestion_result}
+
+@app.get("/api/github/status")
+def github_status():
+    status = dict(app.state.github_sync)
+    if app.state.history and status.get("repository"):
+        status["commit_count"] = app.state.history.github_commit_count(status["repository"])
+    else:
+        status["commit_count"] = 0
+    return status
+
+@app.get("/api/github/commits")
+def github_commits(limit: int = Query(default=20, ge=1, le=100)):
+    if not app.state.history:
+        return {"items":[], "detail":"GitHub commit history requires PostgreSQL."}
+    return {"items":app.state.history.list_github_commits(settings.github_repository, limit)}
+
+@app.post("/api/github/webhook")
+async def github_webhook(request: Request):
+    if not app.state.history or not settings.github_repository.strip():
+        raise HTTPException(503, "Configure PostgreSQL and GITHUB_REPOSITORY to receive GitHub pushes.")
+    if not settings.github_webhook_secret:
+        raise HTTPException(503, "Configure GITHUB_WEBHOOK_SECRET before enabling the webhook.")
+    body = await request.body()
+    if len(body) > 10 * 1024 * 1024:
+        raise HTTPException(413, "GitHub webhook payload is too large.")
+    if not verify_webhook_signature(body, request.headers.get("x-hub-signature-256", ""),
+                                    settings.github_webhook_secret):
+        raise HTTPException(401, "Invalid GitHub webhook signature.")
+    event_name = request.headers.get("x-github-event", "")
+    if event_name != "push":
+        return {"accepted":True, "ignored_event":event_name}
+    try:
+        payload = json.loads(body)
+        if not isinstance(payload, dict):
+            raise ValueError("GitHub webhook payload must be a JSON object.")
+        repository = normalize_repository(settings.github_repository)
+        commits = push_payload_commits(payload, repository)
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(400, str(exc))
+    result = await asyncio.to_thread(app.state.history.ingest_github_commits, repository, commits)
+    app.state.github_sync.update({
+        "status":"ok",
+        "last_sync_at":datetime.now(timezone.utc).isoformat(),
+        "last_error":None,
+        "last_webhook_commits":result["stored"],
+    })
+    return {"accepted":True, "repository":repository, **result}
 
 @app.get("/api/ai/status")
 async def ai_status():
@@ -474,6 +560,21 @@ async def ask(body: AskRequest):
             if not issue.get("created_at") and not issue.get("resolved_at"):
                 answer_lines.append("Dates: creation and resolution dates are not recorded for this issue.")
             return {"answer":"\n".join(answer_lines), "evidence":evidence, "mode":"issue_lookup"}
+    if (app.state.history and app.state.github_sync.get("enabled")
+            and is_latest_commit_question(body.question)):
+        github_commits = await asyncio.to_thread(
+            app.state.history.list_github_commits,
+            app.state.github_sync["repository"],
+            body.max_evidence,
+        )
+        commit_answer = answer_latest_commit_question(
+            body.question,
+            github_commits,
+            app.state.github_sync["repository"],
+            body.max_evidence,
+        )
+        if commit_answer:
+            return commit_answer
     if app.state.history:
         hits = app.state.history.search_events(body.question, limit=body.max_evidence)["events"]
         evidence = [{"kind":"history_event","event_id":row["event_id"],

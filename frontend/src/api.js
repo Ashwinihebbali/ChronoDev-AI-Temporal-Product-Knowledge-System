@@ -25,6 +25,8 @@ export const api = {
   health: () => request('/health'),
   status: () => request('/api/storage/status'),
   aiStatus: () => request('/api/ai/status'),
+  githubStatus: () => request('/api/github/status'),
+  githubCommits: (limit = 10) => request(`/api/github/commits?limit=${limit}`),
 
   // Historical Timeline & Search
   events: ({ startDate = '', endDate = '', offset = 0, limit = 500 } = {}) => {

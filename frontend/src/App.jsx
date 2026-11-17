@@ -49,6 +49,8 @@ export default function App() {
   // Data State
   const [status, setStatus] = useState(null);
   const [aiStatus, setAiStatus] = useState(null);
+  const [githubStatus, setGithubStatus] = useState(null);
+  const [githubCommits, setGithubCommits] = useState([]);
   const [events, setEvents] = useState([]);
   const [totalEvents, setTotalEvents] = useState(0);
   const [features, setFeatures] = useState([]);
@@ -113,10 +115,12 @@ export default function App() {
       api.graph(200),
       api.flags(100),
       api.aiStatus(),
+      api.githubStatus(),
+      api.githubCommits(10),
     ]);
 
     const failures = [];
-    const [s, t, f, g, fl, ai] = results;
+    const [s, t, f, g, fl, ai, github, commits] = results;
 
     if (s.status === 'fulfilled') setStatus(s.value);
     else failures.push(`Storage: ${s.reason.message}`);
@@ -137,6 +141,12 @@ export default function App() {
 
     if (ai.status === 'fulfilled') setAiStatus(ai.value);
     else failures.push(`AI: ${ai.reason.message}`);
+
+    if (github.status === 'fulfilled') setGithubStatus(github.value);
+    else failures.push(`GitHub sync: ${github.reason.message}`);
+
+    if (commits.status === 'fulfilled') setGithubCommits(commits.value.items || []);
+    else failures.push(`GitHub commits: ${commits.reason.message}`);
 
     setErrors(failures);
     setLoading(false);
@@ -390,6 +400,8 @@ export default function App() {
             <OverviewView
               status={status}
               aiStatus={aiStatus}
+              githubStatus={githubStatus}
+              githubCommits={githubCommits}
               events={events}
               features={features}
               flags={flags}

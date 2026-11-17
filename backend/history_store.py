@@ -208,6 +208,108 @@ class HistoryStore:
             self.create_flags_for_events(feature_id)
         return saved
 
+    def known_github_commits(self, repository: str, shas: list[str]) -> set[str]:
+        if not shas:
+            return set()
+        with self._connect() as db:
+            rows = db.execute("""SELECT event_payload->>'commit_hash' AS sha FROM history_events
+                WHERE event_type='github_commit' AND event_payload->>'repository'=%s
+                AND event_payload->>'commit_hash'=ANY(%s)""", (repository, shas)).fetchall()
+        return {row["sha"] for row in rows}
+
+    def ingest_github_commits(self, repository: str, commits: list[dict]):
+        """Store GitHub commit snapshots and dated timeline events, deduplicated by SHA."""
+        stored = 0
+        skipped = 0
+        with self._connect() as db:
+            for commit in commits:
+                event_date = self._date(commit.get("date"))
+                sha = str(commit.get("sha") or "").strip()
+                if not sha or not event_date:
+                    skipped += 1
+                    continue
+                message = str(commit.get("message") or "(no commit message)")[:2000]
+                url = str(commit.get("url") or
+                          f"https://github.com/{repository}/commit/{sha}")
+                refs = [{"type":"commit", "id":sha, "url":url}]
+                event_id = self._stable_id("github_commit", repository, sha)
+                event = {
+                    "date":str(commit.get("date")),
+                    "event_type":"github_commit",
+                    "event":message,
+                    "summary":message,
+                    "message":message,
+                    "feature":repository,
+                    "aim_objective":message,
+                    "objective_basis":"commit metadata provided by GitHub",
+                    "objective_confidence":"unknown",
+                    "author":str(commit.get("author") or "Unknown author"),
+                    "commit_hash":sha,
+                    "commit_url":url,
+                    "repository":repository,
+                    "files_changed":commit.get("files", []),
+                    "evidence":[{"type":"commit", "id":sha, "url":url}],
+                }
+                source_payload = {
+                    "source":"github",
+                    "source_type":"commit",
+                    "source_id":sha,
+                    "repository":repository,
+                    "commit_hash":sha,
+                    "message":message,
+                    "author":event["author"],
+                    "date":event["date"],
+                    "url":url,
+                    "files":commit.get("files", []),
+                }
+                db.execute("""INSERT INTO source_artifacts(source_type,source_id,event_date,summary,payload)
+                    VALUES('commit',%s,%s,%s,%s::jsonb)
+                    ON CONFLICT(source_type,source_id) DO UPDATE SET
+                    event_date=EXCLUDED.event_date,summary=EXCLUDED.summary,
+                    payload=source_artifacts.payload || EXCLUDED.payload""",
+                    (sha,event_date,message,json.dumps(source_payload,ensure_ascii=False)))
+                row = db.execute("""INSERT INTO history_events(event_id,event_type,event_date,summary,
+                    aim_objective,objective_basis,evidence_span,source_refs,feature_ids,confidence,inferred,event_payload)
+                    VALUES(%s,'github_commit',%s,%s,%s,'commit metadata provided by GitHub',%s,
+                    %s::jsonb,'[]'::jsonb,1.0,FALSE,%s::jsonb)
+                    ON CONFLICT(event_id) DO NOTHING RETURNING event_id""",
+                    (event_id,event_date,message,message,message,json.dumps(refs),
+                     json.dumps(event,ensure_ascii=False))).fetchone()
+                if row:
+                    stored += 1
+                else:
+                    skipped += 1
+        return {"stored":stored, "duplicates":skipped}
+
+    def github_commit_count(self, repository: str) -> int:
+        if not repository:
+            return 0
+        with self._connect() as db:
+            row = db.execute("""SELECT count(*) AS n FROM history_events
+                WHERE event_type='github_commit' AND event_payload->>'repository'=%s""",
+                (repository,)).fetchone()
+        return row["n"]
+
+    def list_github_commits(self, repository: str, limit=20):
+        if not repository:
+            return []
+        with self._connect() as db:
+            rows = db.execute("""SELECT event_id,event_date,event_payload FROM history_events
+                WHERE event_type='github_commit' AND event_payload->>'repository'=%s
+                ORDER BY (event_payload->>'date')::timestamptz DESC,event_id DESC LIMIT %s""",
+                (repository,limit)).fetchall()
+        items = []
+        for row in rows:
+            payload = row["event_payload"]
+            if isinstance(payload, str):
+                payload = json.loads(payload)
+            item = dict(payload)
+            item["event_id"] = row["event_id"]
+            item.setdefault("date", str(row["event_date"]))
+            item.setdefault("message", item.get("summary") or item.get("event"))
+            items.append(item)
+        return items
+
     def list_events(self, *, start_date=None, end_date=None, entity_id=None, event_type=None, limit=500, offset=0):
         clauses, params = [], []
         for column, value, op in (("event_date",start_date,">="),("event_date",end_date,"<="),

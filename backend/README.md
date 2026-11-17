@@ -89,3 +89,30 @@ The dashboard also has **Batch import** for a JSON array of up to 25 records. Th
 - `POST /api/ask` retrieves evidence and asks Ollama to summarize it.
 
 Objectives are inferred from source summaries or commit messages because the dataset has no explicit date-wise project-goal records. Ollama output can still need evidence review.
+
+## Live GitHub commits
+
+Live commit ingestion uses PostgreSQL history storage. In `backend/.env`, set:
+
+```text
+GITHUB_REPOSITORY=OWNER/REPO
+GITHUB_TOKEN=
+GITHUB_WEBHOOK_SECRET=<long-random-secret>
+GITHUB_POLL_INTERVAL_SECONDS=300
+GITHUB_INITIAL_COMMIT_COUNT=20
+```
+
+The token is optional for public repositories and recommended for GitHub API rate limits; it is required for private repositories. Keep it server-side and never add it to frontend configuration. Restart Compose after changing the environment:
+
+```powershell
+docker compose up -d --build api frontend
+```
+
+For near-real-time delivery, add a GitHub **push** webhook pointing to `https://YOUR-DOMAIN/api/github/webhook` and use the same secret as `GITHUB_WEBHOOK_SECRET`. The server validates GitHub's SHA-256 signature and ignores deliveries for other repositories. Polling is also enabled by default every five minutes; set `GITHUB_POLL_INTERVAL_SECONDS=0` to disable polling and use only the webhook. Polling imports the latest 20 commits on first run, then detects newer commits; the shared SHA-based history prevents duplicate webhook and polling deliveries.
+
+- `GET /api/github/status` reports configuration and the most recent sync result.
+- `GET /api/github/commits?limit=10` returns recent ingested commits.
+- The dashboard overview shows recent commits and links back to GitHub.
+- Ingested commits are added to the history timeline, source evidence, and Neo4j projection.
+
+For a local-only setup, polling can reach GitHub without a webhook. GitHub's webhook cannot reach a developer machine unless the API is exposed through a secure public HTTPS endpoint.

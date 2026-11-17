@@ -44,6 +44,11 @@ services:
       OLLAMA_URL: http://host.docker.internal:11434
       OLLAMA_MODEL: llama3.2:3b
       USE_OLLAMA: "true"
+      GITHUB_REPOSITORY: ${GITHUB_REPOSITORY:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      GITHUB_POLL_INTERVAL_SECONDS: ${GITHUB_POLL_INTERVAL_SECONDS:-300}
+      GITHUB_INITIAL_COMMIT_COUNT: ${GITHUB_INITIAL_COMMIT_COUNT:-20}
     volumes:
       - ../axis2_cleaned/axis2_cleaned:/app/data:ro
     ports:

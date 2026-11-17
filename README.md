@@ -112,4 +112,4 @@ docker compose up -d --build
 ---
 
 ## 📄 License
-This project is developed for hackathon presentation and research purposes on Apache Axis2 software evolution.
+This project is developed for research purposes on Apache Axis2 software evolution.
